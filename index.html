@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Учёт финансов</title>
+<style>
+  :root {
+    --bg: #1e1e2e; --panel: #313244; --text: #cdd6f4;
+    --green: #40c463; --pink: #f38ba8; --blue: #89b4fa;
+  }
+  body.light {
+    --bg: #e9edf5; --panel: #ffffff; --text: #1e1e2e;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg); color: var(--text);
+    background-size: cover; background-position: center;
+    transition: background-color .2s;
+  }
+  .app { min-height: 100%; padding: 16px; max-width: 720px; margin: 0 auto; }
+  .card { background: var(--panel); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  label { display: block; font-size: 14px; margin: 10px 0 4px; opacity: .9; }
+  input[type=text] {
+    width: 100%; padding: 12px; font-size: 16px; border-radius: 10px;
+    border: 1px solid #555; background: var(--bg); color: var(--text);
+  }
+  .row { display: flex; gap: 10px; margin-top: 12px; }
+  button {
+    flex: 1; padding: 14px; font-size: 16px; border: none; border-radius: 12px;
+    color: #fff; font-weight: 600; cursor: pointer;
+  }
+  .inc { background: var(--green); }
+  .exp { background: var(--pink); }
+  .del { background: #585b70; }
+  .tools { display: flex; gap: 10px; margin-top: 12px; }
+  .tools button { background: var(--blue); font-size: 14px; padding: 12px; }
+  .stats { font-size: 14px; font-weight: 700; line-height: 1.7; }
+  .stats .g { color: var(--green); }
+  .stats .p { color: var(--pink); }
+  .hist-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px; border-radius: 10px; margin-bottom: 8px;
+    background: var(--panel); border: 2px solid transparent;
+  }
+  .hist-item.sel { border-color: var(--blue); }
+  .hist-item .d { font-weight: 700; }
+  .hist-item .a { font-weight: 700; }
+  .hist-item.inc .a { color: var(--green); }
+  .hist-item.exp .a { color: var(--pink); }
+  .empty { opacity: .5; text-align: center; padding: 20px; }
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: none; align-items: center; justify-content: center; z-index: 10;
+  }
+  .modal-bg.show { display: flex; }
+  .modal { background: var(--panel); padding: 24px; border-radius: 16px; width: 280px; text-align: center; }
+  .modal p { margin: 0 0 16px; font-size: 15px; }
+  .modal .mb { display: flex; gap: 10px; }
+  .modal button { font-size: 15px; padding: 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="card">
+    <h1>Учёт финансов</h1>
+    <label>Сумма (500 / 500k / 1кк / 1ккк)</label>
+    <input type="text" id="amount" inputmode="decimal" placeholder="">
+    <label>На что (описание)</label>
+    <input type="text" id="desc" placeholder="">
+    <div class="row">
+      <button class="inc" onclick="add('inc')">Доход</button>
+      <button class="exp" onclick="add('exp')">Расход</button>
+    </div>
+    <div class="row">
+      <button class="del" onclick="del()">Удалить выбранное</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="tools">
+      <button onclick="toggleTheme()">Тема</button>
+      <button onclick="pickBg()">Свой фон</button>
+      <input type="file" id="bgfile" accept="image/*" style="display:none" onchange="setBg(event)">
+    </div>
+  </div>
+  <div class="card" id="history"></div>
+</div>
+
+<div class="modal-bg" id="modal">
+  <div class="modal">
+    <p id="modal-text"></p>
+    <div class="mb">
+      <button id="modal-no" style="background:#585b70">Нет</button>
+      <button id="modal-yes" style="background:#40c463">Да</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const KEY = 'finance_records_v1', BG = 'finance_bg_v1', TH = 'finance_theme_v1';
+let records = JSON.parse(localStorage.getItem(KEY) || '[]');
+let selected = null;
+
+function parseAmount(t) {
+  t = t.trim().toLowerCase().replace(/\s/g, '').replace(',', '.');
+  if (!t) throw 'empty';
+  const suf = [
+    ['ккк', 1e9], ['млрд', 1e9], ['b', 1e9],
+    ['кк', 1e6], ['млн', 1e6], ['м', 1e6], ['kk', 1e6],
+    ['к', 1e3], ['k', 1e3], ['тыс', 1e3]
+  ];
+  for (const [s, m] of suf) {
+    if (t.endsWith(s)) return parseFloat(t.slice(0, -s.length)) * m;
+  }
+  return parseFloat(t);
+}
+
+function add(kind) {
+  const a = document.getElementById('amount');
+  const d = document.getElementById('desc');
+  try { var val = parseAmount(a.value); }
+  catch (e) { return dialog('Введите число (например: 500, 500k, 1кк, 1ккк)'); }
+  records.push({ kind, desc: d.value.trim() || '—', amount: val });
+  a.value = ''; d.value = ''; selected = null;
+  save(); render();
+}
+
+function del() {
+  if (selected === null) return dialog('Выберите запись в истории');
+  confirmDialog('Точно уверены?', 'Удалить выбранную запись?', () => {
+    records.splice(selected, 1); selected = null; save(); render();
+  });
+}
+
+function save() { localStorage.setItem(KEY, JSON.stringify(records)); }
+
+function render() {
+  const ti = records.filter(r => r.kind === 'inc').reduce((s, r) => s + r.amount, 0);
+  const te = records.filter(r => r.kind === 'exp').reduce((s, r) => s + r.amount, 0);
+  const res = ti - te;
+  let resHtml;
+  if (res > 0) resHtml = `<span class="g">Прибыль: ${res.toFixed(2)}</span>`;
+  else if (res < 0) resHtml = `<span class="p">Убыток: ${Math.abs(res).toFixed(2)}</span>`;
+  else resHtml = `Итог: 0.00`;
+  document.getElementById('stats').innerHTML =
+    `<span class="g">Доходы:   ${ti.toFixed(2)}</span><br>` +
+    `<span class="p">Расходы:  ${te.toFixed(2)}</span><br>` +
+    resHtml;
+
+  const h = document.getElementById('history');
+  if (!records.length) { h.innerHTML = '<div class="empty">История пуста</div>'; return; }
+  h.innerHTML = records.map((r, i) => {
+    const sign = r.kind === 'inc' ? '+' : '-';
+    return `<div class="hist-item ${r.kind} ${i === selected ? 'sel' : ''}" onclick="sel(${i})">
+      <span class="d">${escapeHtml(r.desc)}</span>
+      <span class="a">${sign}${r.amount.toFixed(2)}</span></div>`;
+  }).join('');
+}
+
+function sel(i) { selected = (selected === i) ? null : i; render(); }
+
+function escapeHtml(s) { return s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function toggleTheme() {
+  const light = document.body.classList.toggle('light');
+  localStorage.setItem(TH, light ? 'light' : 'dark');
+}
+
+function pickBg() { document.getElementById('bgfile').click(); }
+function setBg(e) {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { localStorage.setItem(BG, r.result); applyBg(); };
+  r.readAsDataURL(f);
+}
+function applyBg() {
+  const bg = localStorage.getItem(BG);
+  if (bg) document.body.style.backgroundImage = `url(${bg})`;
+}
+
+let modalYes = () => {};
+function dialog(msg) {
+  document.getElementById('modal-text').textContent = msg;
+  document.getElementById('modal-yes').style.display = 'none';
+  document.getElementById('modal-no').textContent = 'ОК';
+  document.getElementById('modal-no').onclick = closeModal;
+  document.getElementById('modal').classList.add('show');
+}
+function confirmDialog(title, msg, cb) {
+  document.getElementById('modal-text').textContent = msg;
+  document.getElementById('modal-yes').style.display = 'block';
+  document.getElementById('modal-no').textContent = 'Нет';
+  document.getElementById('modal-no').onclick = closeModal;
+  modalYes = () => { closeModal(); cb(); };
+  document.getElementById('modal').classList.add('show');
+}
+function closeModal() { document.getElementById('modal').classList.remove('show'); }
+document.getElementById('modal-yes').onclick = () => modalYes();
+
+if (localStorage.getItem(TH) === 'light') document.body.classList.add('light');
+applyBg();
+render();
+</script>
+</body>
+</html>
